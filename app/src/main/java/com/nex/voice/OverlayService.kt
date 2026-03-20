@@ -2,6 +2,7 @@ package com.nex.voice
 
 import android.app.*
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
@@ -13,6 +14,7 @@ import android.util.TypedValue
 import android.view.*
 import android.widget.*
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import kotlinx.coroutines.*
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
@@ -45,7 +47,13 @@ class OverlayService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannels()
-        startForeground(NOTIF_ID, buildForegroundNotification())
+        // Must pass FOREGROUND_SERVICE_TYPE_MICROPHONE on API 29+ or it crashes
+        ServiceCompat.startForeground(
+            this,
+            NOTIF_ID,
+            buildForegroundNotification(),
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        )
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
     }
 
