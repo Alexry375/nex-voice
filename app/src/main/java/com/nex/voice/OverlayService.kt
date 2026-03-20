@@ -196,21 +196,39 @@ class OverlayService : Service() {
 
     private fun startRecording() {
         Log.d(TAG, "startRecording")
+
+        // Check permission at runtime
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+            != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.e(TAG, "RECORD_AUDIO permission not granted")
+            Toast.makeText(this, "Nex: Mic permission not granted. Open app first.", Toast.LENGTH_LONG).show()
+            cleanup()
+            return
+        }
+
         audioFile = File(cacheDir, "nex_voice_${System.currentTimeMillis()}.ogg")
 
-        recorder = (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-            MediaRecorder(this) else @Suppress("DEPRECATION") MediaRecorder()).apply {
-            setAudioSource(MediaRecorder.AudioSource.MIC)
-            setOutputFormat(MediaRecorder.OutputFormat.OGG)
-            setAudioEncoder(MediaRecorder.AudioEncoder.OPUS)
-            setAudioSamplingRate(16000)
-            setAudioChannels(1)
-            setOutputFile(audioFile!!.absolutePath)
-            prepare()
-            start()
+        try {
+            recorder = (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+                MediaRecorder(this) else @Suppress("DEPRECATION") MediaRecorder()).apply {
+                setAudioSource(MediaRecorder.AudioSource.MIC)
+                setOutputFormat(MediaRecorder.OutputFormat.OGG)
+                setAudioEncoder(MediaRecorder.AudioEncoder.OPUS)
+                setAudioSamplingRate(16000)
+                setAudioChannels(1)
+                setOutputFile(audioFile!!.absolutePath)
+                prepare()
+                start()
+            }
+            isRecording = true
+            Log.d(TAG, "Recording started")
+        } catch (e: Exception) {
+            Log.e(TAG, "setAudioSource failed: ${e.message}", e)
+            Toast.makeText(this, "Nex: setAudioSource failed. ${e.message?.take(60)}", Toast.LENGTH_LONG).show()
+            cleanup()
+            return
         }
-        isRecording = true
-        Log.d(TAG, "Recording started")
 
         scope.launch {
             delay(60_000)
