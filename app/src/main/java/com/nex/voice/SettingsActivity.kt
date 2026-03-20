@@ -104,6 +104,18 @@ class SettingsActivity : AppCompatActivity() {
         }
         layout.addView(bridgeInput)
 
+        // Auto-fill button
+        layout.addView(Button(this).apply {
+            text = "Auto-fill defaults"
+            setOnClickListener {
+                tokenInput.setText(BuildConfig.DEFAULT_BOT_TOKEN)
+                chatIdInput.setText(BuildConfig.DEFAULT_CHAT_ID)
+                groqInput.setText(BuildConfig.DEFAULT_GROQ_KEY)
+                bridgeInput.setText(BuildConfig.DEFAULT_BRIDGE_URL)
+                Toast.makeText(this@SettingsActivity, "Fields filled — tap Save", Toast.LENGTH_SHORT).show()
+            }
+        })
+
         // Save button
         layout.addView(Button(this).apply {
             text = "Save"
