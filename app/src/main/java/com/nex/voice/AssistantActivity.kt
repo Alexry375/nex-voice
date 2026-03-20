@@ -21,6 +21,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.*
 import okhttp3.*
+import okhttp3.FormBody
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.asRequestBody
 import org.json.JSONObject
@@ -185,6 +186,7 @@ class AssistantActivity : AppCompatActivity() {
                 val prefs = getSharedPreferences("nex_voice", MODE_PRIVATE)
                 val botToken = prefs.getString("bot_token", "") ?: ""
                 val chatId = prefs.getString("chat_id", "") ?: ""
+                val groqKey = prefs.getString("groq_api_key", "") ?: ""
 
                 if (botToken.isEmpty() || chatId.isEmpty()) {
                     showNotification("Nex", "Configure bot token and chat ID in settings")
@@ -192,15 +194,41 @@ class AssistantActivity : AppCompatActivity() {
                     return@launch
                 }
 
-                // Send voice to Telegram bot (it handles Groq transcription)
+                if (groqKey.isEmpty()) {
+                    showNotification("Nex", "Configure Groq API key in settings")
+                    finish()
+                    return@launch
+                }
+
+                statusText.text = "Transcribing..."
+
+                // Step 1: Transcribe via Groq Whisper
+                val transcript = withContext(Dispatchers.IO) {
+                    transcribeWithGroq(groqKey, file)
+                }
+
+                if (transcript.isNullOrBlank()) {
+                    showNotification("Nex", "Could not transcribe voice")
+                    finish()
+                    return@launch
+                }
+
+                statusText.text = "Sending: $transcript"
+                val bridgeUrl = prefs.getString("bridge_url", "http://100.96.206.81:3458") ?: ""
+
+                // Step 2: Send transcript to bridge via REST API
                 val sent = withContext(Dispatchers.IO) {
-                    sendVoiceToTelegram(botToken, chatId, file)
+                    sendToBridge(bridgeUrl, transcript)
                 }
 
                 if (sent) {
-                    showNotification("Nex", "Voice sent ✓")
+                    showNotification("Nex", "🎤 $transcript")
                 } else {
-                    showNotification("Nex", "Failed to send voice")
+                    showNotification("Nex", "Failed to send — trying Telegram fallback")
+                    // Fallback: send via Telegram bot sendMessage
+                    withContext(Dispatchers.IO) {
+                        sendTextToBot(botToken, chatId, "🎤 $transcript")
+                    }
                 }
             } catch (e: Exception) {
                 showNotification("Nex", "Error: ${e.message?.take(80)}")
@@ -212,23 +240,76 @@ class AssistantActivity : AppCompatActivity() {
     }
 
     /**
-     * Send voice file directly to Telegram as a voice message.
-     * The Telegram bot on the server handles Groq transcription.
+     * Transcribe audio via Groq Whisper API.
      */
-    private fun sendVoiceToTelegram(botToken: String, chatId: String, file: File): Boolean {
-        val client = OkHttpClient()
+    private fun transcribeWithGroq(apiKey: String, file: File): String? {
+        val client = OkHttpClient.Builder()
+            .callTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
 
         val body = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
-            .addFormDataPart("chat_id", chatId)
             .addFormDataPart(
-                "voice", file.name,
+                "file", "voice.ogg",
                 file.asRequestBody("audio/ogg".toMediaType())
             )
+            .addFormDataPart("model", "whisper-large-v3-turbo")
+            .addFormDataPart("language", "fr")
+            .addFormDataPart("response_format", "json")
             .build()
 
         val request = Request.Builder()
-            .url("https://api.telegram.org/bot$botToken/sendVoice")
+            .url("https://api.groq.com/openai/v1/audio/transcriptions")
+            .addHeader("Authorization", "Bearer $apiKey")
+            .post(body)
+            .build()
+
+        val response = client.newCall(request).execute()
+        if (!response.isSuccessful) return null
+
+        val json = response.body?.string() ?: return null
+        // Parse {"text": "..."} manually to avoid adding a JSON library
+        val match = Regex(""""text"\s*:\s*"(.*?)"""").find(json)
+        return match?.groupValues?.get(1)
+    }
+
+    /**
+     * Send transcribed text directly to the Nexus bridge server.
+     */
+    private fun sendToBridge(bridgeUrl: String, text: String): Boolean {
+        val client = OkHttpClient.Builder()
+            .callTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+
+        val json = """{"content":"${text.replace("\"", "\\\"")}","source":"nex-voice"}"""
+        val body = RequestBody.create("application/json".toMediaType(), json)
+
+        val request = Request.Builder()
+            .url("$bridgeUrl/api/voice-message")
+            .post(body)
+            .build()
+
+        return try {
+            val response = client.newCall(request).execute()
+            response.isSuccessful
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Fallback: send text via Telegram bot API.
+     */
+    private fun sendTextToBot(botToken: String, chatId: String, text: String): Boolean {
+        val client = OkHttpClient()
+
+        val body = FormBody.Builder()
+            .add("chat_id", chatId)
+            .add("text", text)
+            .build()
+
+        val request = Request.Builder()
+            .url("https://api.telegram.org/bot$botToken/sendMessage")
             .post(body)
             .build()
 

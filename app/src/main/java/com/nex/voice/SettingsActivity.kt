@@ -80,6 +80,30 @@ class SettingsActivity : AppCompatActivity() {
         }
         layout.addView(chatIdInput)
 
+        // Groq API Key
+        layout.addView(TextView(this).apply {
+            text = "\nGroq API Key (for voice transcription)"
+            textSize = 14f
+        })
+        val groqInput = EditText(this).apply {
+            hint = "gsk_..."
+            setText(prefs.getString("groq_api_key", ""))
+            isSingleLine = true
+        }
+        layout.addView(groqInput)
+
+        // Bridge URL
+        layout.addView(TextView(this).apply {
+            text = "\nNexus Bridge URL"
+            textSize = 14f
+        })
+        val bridgeInput = EditText(this).apply {
+            hint = "http://100.96.206.81:3458"
+            setText(prefs.getString("bridge_url", "http://100.96.206.81:3458"))
+            isSingleLine = true
+        }
+        layout.addView(bridgeInput)
+
         // Save button
         layout.addView(Button(this).apply {
             text = "Save"
@@ -87,6 +111,8 @@ class SettingsActivity : AppCompatActivity() {
                 prefs.edit()
                     .putString("bot_token", tokenInput.text.toString().trim())
                     .putString("chat_id", chatIdInput.text.toString().trim())
+                    .putString("groq_api_key", groqInput.text.toString().trim())
+                    .putString("bridge_url", bridgeInput.text.toString().trim())
                     .apply()
                 Toast.makeText(this@SettingsActivity, "Saved ✓", Toast.LENGTH_SHORT).show()
             }
