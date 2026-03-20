@@ -276,27 +276,36 @@ class OverlayService : Service() {
                 Log.d(TAG, "Transcript: $transcript")
                 statusText?.text = "Sending..."
 
+                val botToken = prefs.getString("bot_token", "") ?: ""
+                val chatId = prefs.getString("chat_id", "") ?: ""
+                val label = if (target == "nex") "Nex" else "NexBuilder"
+
+                // Try bridge first (direct HTTP to Pi)
                 val bridgeUrl = prefs.getString("bridge_url", "http://100.96.206.81:3459") ?: ""
                 val targetUrl = when (target) {
                     "nex" -> bridgeUrl.replace(":3459", ":3458")
                     else -> bridgeUrl
                 }
 
-                val sent = withContext(Dispatchers.IO) {
+                val bridgeSent = withContext(Dispatchers.IO) {
                     sendToBridge(targetUrl, transcript)
                 }
 
-                val label = if (target == "nex") "Nex" else "NexBuilder"
-                if (sent) {
+                if (bridgeSent) {
                     showNotification(label, "🎤 $transcript")
                 } else {
-                    val botToken = prefs.getString("bot_token", "") ?: ""
-                    val chatId = prefs.getString("chat_id", "") ?: ""
-                    if (botToken.isNotEmpty() && chatId.isNotEmpty()) {
-                        withContext(Dispatchers.IO) {
-                            sendTextToBot(botToken, chatId, "🎤 $transcript")
+                    // Fallback: open Telegram chat with transcript pre-filled
+                    val botUsername = if (target == "nex") "nex_cc_bot" else "nexBuilder_cc_bot"
+                    val encodedText = java.net.URLEncoder.encode("🎤 $transcript", "UTF-8")
+                    val deepLink = "https://t.me/$botUsername?text=$encodedText"
+                    try {
+                        val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(deepLink)).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         }
-                        showNotification(label, "🎤 (via TG) $transcript")
+                        startActivity(intent)
+                        showNotification(label, "🎤 Tap send in Telegram")
+                    } catch (e: Exception) {
+                        showNotification(label, "Failed: ${e.message?.take(60)}")
                     }
                 }
             } catch (e: Exception) {
