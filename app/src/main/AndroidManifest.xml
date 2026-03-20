@@ -50,6 +50,19 @@
             </intent-filter>
         </activity>
 
+        <!-- Recognition service — required by some OEMs for power button binding -->
+        <service
+            android:name=".NexRecognitionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_RECOGNITION_SERVICE">
+            <intent-filter>
+                <action android:name="android.speech.RecognitionService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.speech"
+                android:resource="@xml/recognition_service" />
+        </service>
+
         <!-- Settings activity — configure bot token and server -->
         <activity
             android:name=".SettingsActivity"
