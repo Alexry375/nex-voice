@@ -10,6 +10,7 @@ import android.graphics.drawable.GradientDrawable
 import android.media.MediaRecorder
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import android.util.TypedValue
 import android.view.*
 import android.widget.*
@@ -33,10 +34,11 @@ class OverlayService : Service() {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var overlayView: View? = null
     private var windowManager: WindowManager? = null
-    private lateinit var statusText: TextView
-    private lateinit var micIcon: ImageView
+    private var statusText: TextView? = null
+    private var micIcon: ImageView? = null
 
     companion object {
+        const val TAG = "NexOverlay"
         const val NOTIF_CHANNEL = "nex_voice"
         const val NOTIF_CHANNEL_FG = "nex_voice_fg"
         const val NOTIF_ID = 2
@@ -46,21 +48,35 @@ class OverlayService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannels()
-        // Must pass FOREGROUND_SERVICE_TYPE_MICROPHONE on API 29+ or it crashes
-        ServiceCompat.startForeground(
-            this,
-            NOTIF_ID,
-            buildForegroundNotification(),
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-        )
-        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        Log.d(TAG, "onCreate")
+        try {
+            createNotificationChannels()
+            ServiceCompat.startForeground(
+                this,
+                NOTIF_ID,
+                buildForegroundNotification(),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            )
+            windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+            Log.d(TAG, "Foreground service started OK")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start foreground: ${e.message}", e)
+            Toast.makeText(this, "Nex overlay error: ${e.message?.take(100)}", Toast.LENGTH_LONG).show()
+            stopSelf()
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Log.d(TAG, "onStartCommand, overlayView=${overlayView != null}")
         if (overlayView == null) {
-            showOverlay()
-            startRecording()
+            try {
+                showOverlay()
+                startRecording()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to show overlay or start recording: ${e.message}", e)
+                Toast.makeText(this, "Nex: ${e.message?.take(100)}", Toast.LENGTH_LONG).show()
+                cleanup()
+            }
         }
         return START_NOT_STICKY
     }
@@ -72,7 +88,7 @@ class OverlayService : Service() {
     }
 
     private fun showOverlay() {
-        // Bar container
+        Log.d(TAG, "showOverlay")
         val barBg = GradientDrawable().apply {
             setColor(0xF0111111.toInt())
             cornerRadius = dpToPx(24).toFloat()
@@ -85,7 +101,6 @@ class OverlayService : Service() {
             setPadding(dpToPx(16), dpToPx(12), dpToPx(16), dpToPx(12))
         }
 
-        // Mic icon
         micIcon = ImageView(this).apply {
             setImageResource(android.R.drawable.ic_btn_speak_now)
             setColorFilter(0xFFFF4444.toInt())
@@ -94,7 +109,6 @@ class OverlayService : Service() {
             marginEnd = dpToPx(12)
         })
 
-        // Status text
         statusText = TextView(this).apply {
             text = "Listening..."
             setTextColor(Color.WHITE)
@@ -102,7 +116,6 @@ class OverlayService : Service() {
         }
         bar.addView(statusText, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
 
-        // Send to Nex button
         val btnNex = TextView(this).apply {
             text = "Nex"
             setTextColor(Color.WHITE)
@@ -121,7 +134,6 @@ class OverlayService : Service() {
             LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { marginEnd = dpToPx(8) })
 
-        // Send to NexBuilder button
         val btnBuilder = TextView(this).apply {
             text = "Builder"
             setTextColor(Color.WHITE)
@@ -137,7 +149,6 @@ class OverlayService : Service() {
         }
         bar.addView(btnBuilder)
 
-        // Cancel button
         val btnCancel = TextView(this).apply {
             text = "✕"
             setTextColor(0xFF888888.toInt())
@@ -150,7 +161,6 @@ class OverlayService : Service() {
             LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { marginStart = dpToPx(8) })
 
-        // Wrap in a FrameLayout with bottom margin
         val wrapper = FrameLayout(this).apply {
             addView(bar, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -171,6 +181,7 @@ class OverlayService : Service() {
             WindowManager.LayoutParams.WRAP_CONTENT,
             layoutType,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         ).apply {
@@ -180,9 +191,11 @@ class OverlayService : Service() {
 
         overlayView = wrapper
         windowManager?.addView(wrapper, params)
+        Log.d(TAG, "Overlay view added")
     }
 
     private fun startRecording() {
+        Log.d(TAG, "startRecording")
         audioFile = File(cacheDir, "nex_voice_${System.currentTimeMillis()}.ogg")
 
         recorder = (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
@@ -197,8 +210,8 @@ class OverlayService : Service() {
             start()
         }
         isRecording = true
+        Log.d(TAG, "Recording started")
 
-        // Auto-stop after 60s
         scope.launch {
             delay(60_000)
             if (isRecording) stopAndSend("nex")
@@ -208,9 +221,10 @@ class OverlayService : Service() {
     private fun stopAndSend(target: String) {
         if (!isRecording) return
         isRecording = false
+        Log.d(TAG, "stopAndSend target=$target")
 
-        statusText.text = "Transcribing..."
-        micIcon.setColorFilter(0xFF888888.toInt())
+        statusText?.text = "Transcribing..."
+        micIcon?.setColorFilter(0xFF888888.toInt())
 
         try {
             recorder?.stop()
@@ -241,7 +255,8 @@ class OverlayService : Service() {
                     return@launch
                 }
 
-                statusText.text = "Sending..."
+                Log.d(TAG, "Transcript: $transcript")
+                statusText?.text = "Sending..."
 
                 val bridgeUrl = prefs.getString("bridge_url", "http://100.96.206.81:3459") ?: ""
                 val targetUrl = when (target) {
@@ -267,6 +282,7 @@ class OverlayService : Service() {
                     }
                 }
             } catch (e: Exception) {
+                Log.e(TAG, "Error: ${e.message}", e)
                 showNotification("Nex", "Error: ${e.message?.take(80)}")
             } finally {
                 file.delete()
@@ -285,7 +301,10 @@ class OverlayService : Service() {
     }
 
     private fun cleanup() {
-        overlayView?.let { windowManager?.removeView(it) }
+        Log.d(TAG, "cleanup")
+        try {
+            overlayView?.let { windowManager?.removeView(it) }
+        } catch (_: Exception) {}
         overlayView = null
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -338,6 +357,9 @@ class OverlayService : Service() {
         val ch1 = NotificationChannel(NOTIF_CHANNEL, "Nex Voice", NotificationManager.IMPORTANCE_DEFAULT)
         val ch2 = NotificationChannel(NOTIF_CHANNEL_FG, "Nex Recording", NotificationManager.IMPORTANCE_LOW).apply {
             description = "Shown while recording"
+            setShowBadge(false)
+            enableVibration(false)
+            setSound(null, null)
         }
         getSystemService(NotificationManager::class.java)?.apply {
             createNotificationChannel(ch1)
@@ -352,6 +374,8 @@ class OverlayService : Service() {
             .setContentText("Recording...")
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
+            .setSilent(true)
+            .setCategory(Notification.CATEGORY_SERVICE)
             .build()
     }
 
@@ -368,10 +392,13 @@ class OverlayService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        Log.d(TAG, "onDestroy")
         scope.cancel()
         if (isRecording) {
             try { recorder?.stop(); recorder?.release() } catch (_: Exception) {}
         }
-        overlayView?.let { windowManager?.removeView(it) }
+        try {
+            overlayView?.let { windowManager?.removeView(it) }
+        } catch (_: Exception) {}
     }
 }
