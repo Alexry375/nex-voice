@@ -18,7 +18,7 @@ android {
         buildConfigField("String", "DEFAULT_BOT_TOKEN", "\"${findProperty("nex.bot_token") ?: System.getenv("NEX_BOT_TOKEN") ?: ""}\"")
         buildConfigField("String", "DEFAULT_CHAT_ID", "\"${findProperty("nex.chat_id") ?: System.getenv("NEX_CHAT_ID") ?: ""}\"")
         buildConfigField("String", "DEFAULT_GROQ_KEY", "\"${findProperty("nex.groq_key") ?: System.getenv("NEX_GROQ_KEY") ?: ""}\"")
-        buildConfigField("String", "DEFAULT_BRIDGE_URL", "\"${findProperty("nex.bridge_url") ?: System.getenv("NEX_BRIDGE_URL") ?: "http://100.96.206.81:3458"}\"")
+        buildConfigField("String", "DEFAULT_BRIDGE_URL", "\"${findProperty("nex.bridge_url") ?: System.getenv("NEX_BRIDGE_URL") ?: "http://100.96.206.81:3459"}\"")
     }
 
     buildFeatures {

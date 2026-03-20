@@ -98,8 +98,8 @@ class SettingsActivity : AppCompatActivity() {
             textSize = 14f
         })
         val bridgeInput = EditText(this).apply {
-            hint = "http://100.96.206.81:3458"
-            setText(prefs.getString("bridge_url", "http://100.96.206.81:3458"))
+            hint = "http://100.96.206.81:3459"
+            setText(prefs.getString("bridge_url", "http://100.96.206.81:3459"))
             isSingleLine = true
         }
         layout.addView(bridgeInput)

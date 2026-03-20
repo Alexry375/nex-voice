@@ -6,14 +6,23 @@ import android.animation.ValueAnimator
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.pm.PackageManager
+import android.graphics.Color
+import android.graphics.PixelFormat
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.media.MediaRecorder
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
+import android.content.Intent
+import android.net.Uri
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -21,23 +30,15 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.*
 import okhttp3.*
-import okhttp3.FormBody
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.asRequestBody
 import org.json.JSONObject
 import java.io.File
-import java.io.IOException
 
 /**
- * Minimal transparent overlay activity.
- * Shows a pulsing mic icon while recording, then sends to Telegram via Groq Whisper.
- *
- * Flow:
- *   1. Activity opens → starts recording immediately
- *   2. User taps the mic (or waits 30s) → stops recording
- *   3. Audio sent to Groq Whisper → transcript
- *   4. Transcript sent to Telegram bot → notification with "sent" confirmation
- *   5. Activity closes
+ * Floating overlay assistant.
+ * Shows a compact recording bar at the bottom of the screen, on top of other apps.
+ * Two send buttons: Nex (bridge) and NexBuilder (port 3459).
  */
 class AssistantActivity : AppCompatActivity() {
 
@@ -58,12 +59,19 @@ class AssistantActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Transparent overlay window
+        // Make the activity truly transparent — no window background
+        window.setBackgroundDrawableResource(android.R.color.transparent)
         window.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
+        window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
+
+        // Make the activity translucent so the user sees their current app
+        window.attributes = window.attributes.apply {
+            dimAmount = 0f
+        }
+        window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
 
         createNotificationChannel()
 
-        // Check mic permission
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED
         ) {
@@ -90,50 +98,120 @@ class AssistantActivity : AppCompatActivity() {
         }
     }
 
+    private fun dpToPx(dp: Int): Int {
+        return TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP, dp.toFloat(), resources.displayMetrics
+        ).toInt()
+    }
+
     private fun setupUI() {
-        val frame = FrameLayout(this).apply {
-            setBackgroundColor(0xCC000000.toInt()) // Semi-transparent black
-            isClickable = true
-            setOnClickListener { stopAndSend() }
+        // Root frame — fully transparent, doesn't block touches except on the bar
+        val root = FrameLayout(this).apply {
+            setBackgroundColor(Color.TRANSPARENT)
         }
 
-        // Mic icon
+        // Bottom bar container
+        val barBg = GradientDrawable().apply {
+            setColor(0xF0111111.toInt())
+            cornerRadius = dpToPx(24).toFloat()
+        }
+
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = barBg
+            setPadding(dpToPx(16), dpToPx(12), dpToPx(16), dpToPx(12))
+            elevation = dpToPx(8).toFloat()
+        }
+
+        // Mic icon (pulsing)
         micIcon = ImageView(this).apply {
             setImageResource(android.R.drawable.ic_btn_speak_now)
-            setColorFilter(0xFFFFFFFF.toInt())
+            setColorFilter(0xFFFF4444.toInt()) // Red = recording
         }
-        val micParams = FrameLayout.LayoutParams(200, 200).apply {
-            gravity = Gravity.CENTER
-        }
-        frame.addView(micIcon, micParams)
+        bar.addView(micIcon, LinearLayout.LayoutParams(dpToPx(32), dpToPx(32)).apply {
+            marginEnd = dpToPx(12)
+        })
 
         // Status text
         statusText = TextView(this).apply {
-            text = "Listening... Tap to send"
-            setTextColor(0xFFCCCCCC.toInt())
-            textSize = 16f
-            gravity = Gravity.CENTER
+            text = "Listening..."
+            setTextColor(Color.WHITE)
+            textSize = 14f
         }
-        val textParams = FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT,
+        bar.addView(statusText, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+
+        // Send to Nex button
+        val btnNex = TextView(this).apply {
+            text = "Nex"
+            setTextColor(Color.WHITE)
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            val bg = GradientDrawable().apply {
+                setColor(0xFF2563EB.toInt()) // Blue
+                cornerRadius = dpToPx(16).toFloat()
+            }
+            background = bg
+            setPadding(dpToPx(16), dpToPx(8), dpToPx(16), dpToPx(8))
+            gravity = Gravity.CENTER
+            setOnClickListener { stopAndSend("nex") }
+        }
+        bar.addView(btnNex, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply {
+            marginEnd = dpToPx(8)
+        })
+
+        // Send to NexBuilder button
+        val btnBuilder = TextView(this).apply {
+            text = "Builder"
+            setTextColor(Color.WHITE)
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            val bg = GradientDrawable().apply {
+                setColor(0xFF7C3AED.toInt()) // Purple
+                cornerRadius = dpToPx(16).toFloat()
+            }
+            background = bg
+            setPadding(dpToPx(16), dpToPx(8), dpToPx(16), dpToPx(8))
+            gravity = Gravity.CENTER
+            setOnClickListener { stopAndSend("nexbuilder") }
+        }
+        bar.addView(btnBuilder)
+
+        // Cancel button (X)
+        val btnCancel = TextView(this).apply {
+            text = "✕"
+            setTextColor(0xFF888888.toInt())
+            textSize = 18f
+            setPadding(dpToPx(12), dpToPx(4), dpToPx(4), dpToPx(4))
+            setOnClickListener { cancelAndClose() }
+        }
+        bar.addView(btnCancel, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply {
+            marginStart = dpToPx(8)
+        })
+
+        // Position bar at bottom with margins
+        val barParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.WRAP_CONTENT
         ).apply {
-            gravity = Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM
-            bottomMargin = 200
+            gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            leftMargin = dpToPx(16)
+            rightMargin = dpToPx(16)
+            bottomMargin = dpToPx(40)
         }
-        frame.addView(statusText, textParams)
+        root.addView(bar, barParams)
 
-        setContentView(frame)
+        setContentView(root)
 
         // Pulse animation on mic
-        pulseAnimator = ObjectAnimator.ofFloat(micIcon, View.SCALE_X, 1f, 1.3f).apply {
-            duration = 600
-            repeatMode = ValueAnimator.REVERSE
-            repeatCount = ValueAnimator.INFINITE
-            start()
-        }
-        ObjectAnimator.ofFloat(micIcon, View.SCALE_Y, 1f, 1.3f).apply {
-            duration = 600
+        pulseAnimator = ObjectAnimator.ofFloat(micIcon, View.ALPHA, 1f, 0.3f).apply {
+            duration = 500
             repeatMode = ValueAnimator.REVERSE
             repeatCount = ValueAnimator.INFINITE
             start()
@@ -156,27 +234,25 @@ class AssistantActivity : AppCompatActivity() {
         }
         isRecording = true
 
-        // Auto-stop after 30 seconds
+        // Auto-stop after 60 seconds
         scope.launch {
-            delay(30_000)
-            if (isRecording) stopAndSend()
+            delay(60_000)
+            if (isRecording) stopAndSend("nex")
         }
     }
 
-    private fun stopAndSend() {
+    private fun stopAndSend(target: String) {
         if (!isRecording) return
         isRecording = false
 
         pulseAnimator?.cancel()
-        statusText.text = "Sending..."
+        statusText.text = "Transcribing..."
         micIcon.setColorFilter(0xFF888888.toInt())
 
         try {
             recorder?.stop()
             recorder?.release()
-        } catch (e: Exception) {
-            // Ignore
-        }
+        } catch (e: Exception) {}
         recorder = null
 
         val file = audioFile ?: run { finish(); return }
@@ -184,15 +260,7 @@ class AssistantActivity : AppCompatActivity() {
         scope.launch {
             try {
                 val prefs = getSharedPreferences("nex_voice", MODE_PRIVATE)
-                val botToken = prefs.getString("bot_token", "") ?: ""
-                val chatId = prefs.getString("chat_id", "") ?: ""
                 val groqKey = prefs.getString("groq_api_key", "") ?: ""
-
-                if (botToken.isEmpty() || chatId.isEmpty()) {
-                    showNotification("Nex", "Configure bot token and chat ID in settings")
-                    finish()
-                    return@launch
-                }
 
                 if (groqKey.isEmpty()) {
                     showNotification("Nex", "Configure Groq API key in settings")
@@ -200,9 +268,6 @@ class AssistantActivity : AppCompatActivity() {
                     return@launch
                 }
 
-                statusText.text = "Transcribing..."
-
-                // Step 1: Transcribe via Groq Whisper
                 val transcript = withContext(Dispatchers.IO) {
                     transcribeWithGroq(groqKey, file)
                 }
@@ -213,21 +278,33 @@ class AssistantActivity : AppCompatActivity() {
                     return@launch
                 }
 
-                statusText.text = "Sending: $transcript"
-                val bridgeUrl = prefs.getString("bridge_url", "http://100.96.206.81:3458") ?: ""
+                statusText.text = "Sending..."
 
-                // Step 2: Send transcript to bridge via REST API
-                val sent = withContext(Dispatchers.IO) {
-                    sendToBridge(bridgeUrl, transcript)
+                val bridgeUrl = prefs.getString("bridge_url", "http://100.96.206.81:3459") ?: ""
+                val targetUrl = when (target) {
+                    "nex" -> bridgeUrl.replace(":3459", ":3458") // Nex = bridge port
+                    "nexbuilder" -> bridgeUrl // NexBuilder port
+                    else -> bridgeUrl
                 }
 
+                val sent = withContext(Dispatchers.IO) {
+                    sendToBridge(targetUrl, transcript)
+                }
+
+                val label = if (target == "nex") "Nex" else "NexBuilder"
                 if (sent) {
-                    showNotification("Nex", "🎤 $transcript")
+                    showNotification(label, "🎤 $transcript")
                 } else {
-                    showNotification("Nex", "Failed to send — trying Telegram fallback")
-                    // Fallback: send via Telegram bot sendMessage
-                    withContext(Dispatchers.IO) {
-                        sendTextToBot(botToken, chatId, "🎤 $transcript")
+                    // Fallback to Telegram
+                    val botToken = prefs.getString("bot_token", "") ?: ""
+                    val chatId = prefs.getString("chat_id", "") ?: ""
+                    if (botToken.isNotEmpty() && chatId.isNotEmpty()) {
+                        withContext(Dispatchers.IO) {
+                            sendTextToBot(botToken, chatId, "🎤 $transcript")
+                        }
+                        showNotification(label, "🎤 (via TG) $transcript")
+                    } else {
+                        showNotification(label, "Failed to send")
                     }
                 }
             } catch (e: Exception) {
@@ -239,9 +316,18 @@ class AssistantActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * Transcribe audio via Groq Whisper API.
-     */
+    private fun cancelAndClose() {
+        if (isRecording) {
+            try {
+                recorder?.stop()
+                recorder?.release()
+            } catch (_: Exception) {}
+            recorder = null
+            audioFile?.delete()
+        }
+        finish()
+    }
+
     private fun transcribeWithGroq(apiKey: String, file: File): String? {
         val client = OkHttpClient.Builder()
             .callTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
@@ -268,14 +354,10 @@ class AssistantActivity : AppCompatActivity() {
         if (!response.isSuccessful) return null
 
         val json = response.body?.string() ?: return null
-        // Parse {"text": "..."} manually to avoid adding a JSON library
         val match = Regex(""""text"\s*:\s*"(.*?)"""").find(json)
         return match?.groupValues?.get(1)
     }
 
-    /**
-     * Send transcribed text directly to the Nexus bridge server.
-     */
     private fun sendToBridge(bridgeUrl: String, text: String): Boolean {
         val client = OkHttpClient.Builder()
             .callTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
@@ -297,12 +379,8 @@ class AssistantActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * Fallback: send text via Telegram bot API.
-     */
     private fun sendTextToBot(botToken: String, chatId: String, text: String): Boolean {
         val client = OkHttpClient()
-
         val body = FormBody.Builder()
             .add("chat_id", chatId)
             .add("text", text)
@@ -341,15 +419,7 @@ class AssistantActivity : AppCompatActivity() {
 
     override fun onBackPressed() {
         super.onBackPressed()
-        if (isRecording) {
-            try {
-                recorder?.stop()
-                recorder?.release()
-            } catch (_: Exception) {}
-            recorder = null
-            audioFile?.delete()
-        }
-        finish()
+        cancelAndClose()
     }
 
     override fun onDestroy() {
