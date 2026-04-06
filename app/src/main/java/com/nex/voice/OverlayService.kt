@@ -134,8 +134,8 @@ class OverlayService : Service() {
             LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { marginEnd = dpToPx(8) })
 
-        val btnBuilder = TextView(this).apply {
-            text = "Builder"
+        val btnSecondary = TextView(this).apply {
+            text = "Secondary"
             setTextColor(Color.WHITE)
             textSize = 13f
             typeface = Typeface.DEFAULT_BOLD
@@ -147,7 +147,7 @@ class OverlayService : Service() {
             gravity = Gravity.CENTER
             setOnClickListener { stopAndSend("nexbuilder") }
         }
-        bar.addView(btnBuilder)
+        bar.addView(btnSecondary)
 
         val btnCancel = TextView(this).apply {
             text = "✕"
@@ -278,7 +278,7 @@ class OverlayService : Service() {
 
                 val botToken = prefs.getString("bot_token", "") ?: ""
                 val chatId = prefs.getString("chat_id", "") ?: ""
-                val label = if (target == "nex") "Nex" else "NexBuilder"
+                val label = if (target == "nex") "Nex" else "NexSecondary"
 
                 // Try bridge first (direct HTTP to Pi)
                 val bridgeUrl = prefs.getString("bridge_url", "http://100.96.206.81:3459") ?: ""
