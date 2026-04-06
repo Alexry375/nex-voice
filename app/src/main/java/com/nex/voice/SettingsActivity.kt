@@ -159,6 +159,26 @@ class SettingsActivity : AppCompatActivity() {
             textSize = 12f
             setTextColor(0xFF999999.toInt())
         })
+
+        // Refresh + Clear log buttons
+        val logButtons = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+        logButtons.addView(Button(this).apply {
+            text = "Refresh Logs"
+            textSize = 12f
+            setOnClickListener { refreshLogs() }
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        logButtons.addView(Button(this).apply {
+            text = "Clear"
+            textSize = 12f
+            setOnClickListener {
+                AppLog.clear()
+                refreshLogs()
+            }
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        layout.addView(logButtons)
+
         logText = TextView(this).apply {
             textSize = 11f
             setTextColor(0xFF666666.toInt())
@@ -168,8 +188,10 @@ class SettingsActivity : AppCompatActivity() {
 
         setContentView(ScrollView(this).apply { addView(layout) })
 
+        AppLog.init(applicationContext)
         updateStatus()
         appendLog("App started, Android ${android.os.Build.VERSION.SDK_INT}")
+        refreshLogs()
     }
 
     private fun requestAssistantRole() {
@@ -240,10 +262,13 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun appendLog(msg: String) {
-        Log.d("NexVoice", msg)
+        AppLog.d(msg)
+        refreshLogs()
+    }
+
+    private fun refreshLogs() {
         runOnUiThread {
-            val current = logText.text.toString()
-            logText.text = if (current.isEmpty()) msg else "$current\n$msg"
+            logText.text = AppLog.read()
         }
     }
 }

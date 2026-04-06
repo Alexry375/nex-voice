@@ -48,7 +48,8 @@ class OverlayService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        Log.d(TAG, "onCreate")
+        AppLog.init(applicationContext)
+        AppLog.d("OverlayService.onCreate")
         try {
             createNotificationChannels()
             ServiceCompat.startForeground(
@@ -58,22 +59,22 @@ class OverlayService : Service() {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
             )
             windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-            Log.d(TAG, "Foreground service started OK")
+            AppLog.d("Foreground service started OK")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start foreground: ${e.message}", e)
+            AppLog.e("Failed to start foreground", e)
             Toast.makeText(this, "Nex overlay error: ${e.message?.take(100)}", Toast.LENGTH_LONG).show()
             stopSelf()
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.d(TAG, "onStartCommand, overlayView=${overlayView != null}")
+        AppLog.d("onStartCommand, overlayView=${overlayView != null}")
         if (overlayView == null) {
             try {
                 showOverlay()
                 startRecording()
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to show overlay or start recording: ${e.message}", e)
+                AppLog.e("Failed to show overlay or start recording", e)
                 Toast.makeText(this, "Nex: ${e.message?.take(100)}", Toast.LENGTH_LONG).show()
                 cleanup()
             }
@@ -88,7 +89,7 @@ class OverlayService : Service() {
     }
 
     private fun showOverlay() {
-        Log.d(TAG, "showOverlay")
+        AppLog.d("showOverlay")
         val barBg = GradientDrawable().apply {
             setColor(0xF0111111.toInt())
             cornerRadius = dpToPx(24).toFloat()
@@ -191,25 +192,28 @@ class OverlayService : Service() {
 
         overlayView = wrapper
         windowManager?.addView(wrapper, params)
-        Log.d(TAG, "Overlay view added")
+        AppLog.d("Overlay view added to WindowManager")
     }
 
     private fun startRecording() {
-        Log.d(TAG, "startRecording")
+        AppLog.d("startRecording — checking RECORD_AUDIO permission")
 
         // Check permission at runtime
         if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
             != android.content.pm.PackageManager.PERMISSION_GRANTED
         ) {
-            Log.e(TAG, "RECORD_AUDIO permission not granted")
+            AppLog.e("RECORD_AUDIO permission NOT granted → cleanup")
             Toast.makeText(this, "Nex: Mic permission not granted. Open app first.", Toast.LENGTH_LONG).show()
             cleanup()
             return
         }
+        AppLog.d("RECORD_AUDIO permission OK")
 
         audioFile = File(cacheDir, "nex_voice_${System.currentTimeMillis()}.ogg")
+        AppLog.d("Audio file: ${audioFile!!.absolutePath}")
 
         try {
+            AppLog.d("Creating MediaRecorder (SDK ${Build.VERSION.SDK_INT})")
             recorder = (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
                 MediaRecorder(this) else @Suppress("DEPRECATION") MediaRecorder()).apply {
                 setAudioSource(MediaRecorder.AudioSource.MIC)
@@ -218,13 +222,15 @@ class OverlayService : Service() {
                 setAudioSamplingRate(16000)
                 setAudioChannels(1)
                 setOutputFile(audioFile!!.absolutePath)
+                AppLog.d("MediaRecorder.prepare()")
                 prepare()
+                AppLog.d("MediaRecorder.start()")
                 start()
             }
             isRecording = true
-            Log.d(TAG, "Recording started")
+            AppLog.d("Recording started OK ✓")
         } catch (e: Exception) {
-            Log.e(TAG, "setAudioSource failed: ${e.message}", e)
+            AppLog.e("MediaRecorder failed", e)
             Toast.makeText(this, "Nex: setAudioSource failed. ${e.message?.take(60)}", Toast.LENGTH_LONG).show()
             cleanup()
             return
@@ -237,9 +243,12 @@ class OverlayService : Service() {
     }
 
     private fun stopAndSend(target: String) {
-        if (!isRecording) return
+        if (!isRecording) {
+            AppLog.w("stopAndSend($target) called but not recording — ignoring")
+            return
+        }
         isRecording = false
-        Log.d(TAG, "stopAndSend target=$target")
+        AppLog.d("stopAndSend target=$target")
 
         statusText?.text = "Transcribing..."
         micIcon?.setColorFilter(0xFF888888.toInt())
@@ -273,7 +282,7 @@ class OverlayService : Service() {
                     return@launch
                 }
 
-                Log.d(TAG, "Transcript: $transcript")
+                AppLog.d("Transcript: $transcript")
                 statusText?.text = "Sending..."
 
                 val botToken = prefs.getString("bot_token", "") ?: ""
@@ -309,7 +318,7 @@ class OverlayService : Service() {
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error: ${e.message}", e)
+                AppLog.e("stopAndSend error", e)
                 showNotification("Nex", "Error: ${e.message?.take(80)}")
             } finally {
                 file.delete()
@@ -328,7 +337,9 @@ class OverlayService : Service() {
     }
 
     private fun cleanup() {
-        Log.d(TAG, "cleanup")
+        AppLog.d("cleanup() called — removing overlay, stopping service")
+        // Log call stack to see who triggered cleanup
+        AppLog.d("cleanup caller: ${Thread.currentThread().stackTrace.drop(2).take(3).joinToString(" → ") { "${it.methodName}:${it.lineNumber}" }}")
         try {
             overlayView?.let { windowManager?.removeView(it) }
         } catch (_: Exception) {}
@@ -419,7 +430,7 @@ class OverlayService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        Log.d(TAG, "onDestroy")
+        AppLog.d("OverlayService.onDestroy")
         scope.cancel()
         if (isRecording) {
             try { recorder?.stop(); recorder?.release() } catch (_: Exception) {}
